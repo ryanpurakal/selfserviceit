@@ -46,7 +46,7 @@ A minimal RAG-powered IT support prototype that **deflects common tickets** thro
 ## Project structure
 
 ```
-it-assistant/
+.
 ├── backend/
 │   ├── main.py              FastAPI app + routes
 │   ├── embeddings.py        Loaders, chunking, embedding backends
@@ -85,13 +85,13 @@ it-assistant/
 ### 1. Backend
 
 ```bash
-cd it-assistant/backend
+cd backend
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 
 # Optional - copy and add API keys
-cp .env.example ../.env
+cp .env.example .env
 
 uvicorn main:app --reload
 ```
@@ -105,7 +105,7 @@ curl -X POST 'http://127.0.0.1:8000/embed?reset=true'
 ### 2. Frontend
 
 ```bash
-cd it-assistant/frontend
+cd frontend
 npm install
 npm run dev
 ```
