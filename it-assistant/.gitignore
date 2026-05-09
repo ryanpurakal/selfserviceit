@@ -1,0 +1,27 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Python envs
+.venv/
+venv/
+.env
+.env.local
+
+# Vector DB & analytics
+data/chroma_db/
+data/analytics.json
+data/analytics.json.bak
+data/analytics.json.tmp
+
+# Frontend
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+
+# Editors / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
