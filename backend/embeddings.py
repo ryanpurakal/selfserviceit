@@ -218,13 +218,31 @@ def embed_and_store(chunks: list[dict], collection) -> int:
     return len(chunks)
 
 
-def ingest_directory(docs_dir: str, collection) -> dict:
-    """End-to-end: load, chunk, embed, and persist a docs directory."""
+def ingest_directory(
+    docs_path: str,
+    collection_name: str,
+    chroma_client,
+    *,
+    reset: bool = False,
+) -> dict:
+    """End-to-end: load, chunk, embed, and persist a docs directory into a collection."""
 
-    documents = load_documents(docs_dir)
+    if reset:
+        try:
+            chroma_client.delete_collection(collection_name)
+        except Exception:  # pragma: no cover - collection may not exist
+            pass
+
+    collection = chroma_client.get_or_create_collection(
+        name=collection_name,
+        metadata={"hnsw:space": "l2"},
+    )
+
+    documents = load_documents(docs_path)
     chunks = chunk_documents(documents)
     indexed = embed_and_store(chunks, collection)
     return {
+        "collection_name": collection_name,
         "documents_loaded": len(documents),
         "chunks_created": len(chunks),
         "chunks_indexed": indexed,

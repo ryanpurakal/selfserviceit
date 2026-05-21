@@ -1,11 +1,34 @@
 import { useState } from "react";
 import { ChatInterface } from "./components/ChatInterface";
 import { AnalyticsDashboard } from "./components/AnalyticsDashboard";
+import { TabNavigation, type AssistantTab } from "./components/TabNavigation";
 
-type Tab = "chat" | "analytics";
+type ViewTab = "chat" | "analytics";
+
+const CHAT_CONFIG: Record<
+  AssistantTab,
+  {
+    collectionName: "it_docs" | "onboarding_docs";
+    placeholder: string;
+    systemContext: string;
+  }
+> = {
+  it: {
+    collectionName: "it_docs",
+    placeholder: "Ask about VPN, passwords, WiFi, access issues...",
+    systemContext: "IT support",
+  },
+  onboarding: {
+    collectionName: "onboarding_docs",
+    placeholder: "Ask about trading protocols, compliance, platform tools...",
+    systemContext: "trader onboarding",
+  },
+};
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("chat");
+  const [viewTab, setViewTab] = useState<ViewTab>("chat");
+  const [activeTab, setActiveTab] = useState<AssistantTab>("it");
+  const chatConfig = CHAT_CONFIG[activeTab];
 
   return (
     <div className="min-h-screen">
@@ -16,15 +39,20 @@ export default function App() {
               <Logo />
             </div>
             <div>
-              <p className="text-sm font-semibold text-slate-900">Trumid IT Assistant</p>
-              <p className="text-xs text-slate-500">Self-service answers, with a ticket fallback.</p>
+              <p className="text-sm font-semibold text-slate-900">Trumid Assistants</p>
+              <p className="text-xs text-slate-500">
+                IT self-service and trader onboarding in one place.
+              </p>
             </div>
           </div>
           <nav className="flex items-center gap-1 rounded-full bg-slate-100 p-1 text-sm">
-            <TabButton active={tab === "chat"} onClick={() => setTab("chat")}>
+            <TabButton active={viewTab === "chat"} onClick={() => setViewTab("chat")}>
               Ask
             </TabButton>
-            <TabButton active={tab === "analytics"} onClick={() => setTab("analytics")}>
+            <TabButton
+              active={viewTab === "analytics"}
+              onClick={() => setViewTab("analytics")}
+            >
               Analytics
             </TabButton>
           </nav>
@@ -32,7 +60,19 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-5xl px-4 py-8 sm:px-6 sm:py-10">
-        {tab === "chat" ? <ChatInterface /> : <AnalyticsDashboard />}
+        {viewTab === "chat" ? (
+          <div className="space-y-6">
+            <TabNavigation activeTab={activeTab} onTabChange={setActiveTab} />
+            <ChatInterface
+              key={activeTab}
+              collectionName={chatConfig.collectionName}
+              placeholder={chatConfig.placeholder}
+              systemContext={chatConfig.systemContext}
+            />
+          </div>
+        ) : (
+          <AnalyticsDashboard />
+        )}
       </main>
 
       <footer className="border-t border-slate-200/70 bg-white/60">

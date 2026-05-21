@@ -60,7 +60,13 @@ DATA_DIR = Path(os.environ.get("DATA_DIR", PROJECT_ROOT / "data"))
 DOCS_DIR = Path(os.environ.get("DOCS_DIR", DATA_DIR / "docs"))
 CHROMA_DIR = Path(os.environ.get("CHROMA_DIR", DATA_DIR / "chroma_db"))
 ANALYTICS_PATH = Path(os.environ.get("ANALYTICS_PATH", DATA_DIR / "analytics.json"))
-COLLECTION_NAME = os.environ.get("CHROMA_COLLECTION", "it_docs")
+
+# Each assistant searches its own Chroma collection.
+COLLECTION_SOURCES: dict[str, Path] = {
+    "it_docs": DOCS_DIR / "it",
+    "onboarding_docs": DOCS_DIR / "onboarding",
+}
+ALLOWED_COLLECTIONS = frozenset(COLLECTION_SOURCES)
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 CHROMA_DIR.mkdir(parents=True, exist_ok=True)
@@ -69,12 +75,37 @@ chroma_client = chromadb.PersistentClient(
     path=str(CHROMA_DIR),
     settings=Settings(anonymized_telemetry=False, allow_reset=True),
 )
-collection = chroma_client.get_or_create_collection(
-    name=COLLECTION_NAME,
-    metadata={"hnsw:space": "l2"},
-)
 
 analytics = AnalyticsStore(ANALYTICS_PATH)
+
+
+def get_collection(name: str):
+    if name not in ALLOWED_COLLECTIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unknown collection_name {name!r}. Allowed: {sorted(ALLOWED_COLLECTIONS)}",
+        )
+    return chroma_client.get_or_create_collection(
+        name=name,
+        metadata={"hnsw:space": "l2"},
+    )
+
+
+def _ingest_all(*, reset: bool = False) -> list[dict]:
+    stats: list[dict] = []
+    for collection_name, docs_path in COLLECTION_SOURCES.items():
+        if not docs_path.exists():
+            logger.warning("Docs path not found, skipping %s: %s", collection_name, docs_path)
+            continue
+        stats.append(
+            ingest_directory(
+                str(docs_path),
+                collection_name,
+                chroma_client,
+                reset=reset,
+            )
+        )
+    return stats
 
 
 # ---------------------------------------------------------------------------
@@ -83,19 +114,31 @@ analytics = AnalyticsStore(ANALYTICS_PATH)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
-    if collection.count() == 0 and DOCS_DIR.exists():
-        logger.info("Empty collection detected, auto-ingesting %s", DOCS_DIR)
-        try:
-            stats = ingest_directory(str(DOCS_DIR), collection)
-            logger.info("Initial ingestion: %s", stats)
-        except Exception as exc:  # pragma: no cover - defensive
-            logger.exception("Initial ingestion failed: %s", exc)
-    else:
-        logger.info(
-            "ChromaDB ready with %d chunks in collection %r",
-            collection.count(),
-            COLLECTION_NAME,
-        )
+    try:
+        for collection_name in COLLECTION_SOURCES:
+            coll = get_collection(collection_name)
+            if coll.count() == 0:
+                docs_path = COLLECTION_SOURCES[collection_name]
+                if docs_path.exists():
+                    logger.info(
+                        "Empty collection %r detected, auto-ingesting %s",
+                        collection_name,
+                        docs_path,
+                    )
+                    stats = ingest_directory(
+                        str(docs_path),
+                        collection_name,
+                        chroma_client,
+                    )
+                    logger.info("Initial ingestion for %s: %s", collection_name, stats)
+            else:
+                logger.info(
+                    "ChromaDB ready: %r has %d chunks",
+                    collection_name,
+                    coll.count(),
+                )
+    except Exception as exc:  # pragma: no cover - defensive
+        logger.exception("Initial ingestion failed: %s", exc)
     yield
 
 
@@ -134,49 +177,84 @@ app.add_middleware(
 
 @app.get("/health")
 async def health() -> dict:
+    collections = {
+        name: get_collection(name).count() for name in COLLECTION_SOURCES
+    }
     return {
         "status": "ok",
-        "indexed_chunks": collection.count(),
+        "indexed_chunks": sum(collections.values()),
+        "collections": collections,
         "docs_dir": str(DOCS_DIR),
     }
 
 
 @app.post("/embed", response_model=IngestionResponse)
-async def embed(reset: bool = False) -> IngestionResponse:
-    """(Re)ingest every supported file in `data/docs`."""
+async def embed(
+    reset: bool = False,
+    collection_name: str | None = None,
+) -> IngestionResponse:
+    """(Re)ingest documentation. Ingests all collections unless `collection_name` is set."""
 
-    if reset:
-        try:
-            chroma_client.delete_collection(COLLECTION_NAME)
-        except Exception:  # pragma: no cover - defensive
-            pass
-        global collection
-        collection = chroma_client.get_or_create_collection(
-            name=COLLECTION_NAME,
-            metadata={"hnsw:space": "l2"},
+    if collection_name is not None:
+        if collection_name not in ALLOWED_COLLECTIONS:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown collection_name {collection_name!r}",
+            )
+        docs_path = COLLECTION_SOURCES[collection_name]
+        if not docs_path.exists():
+            raise HTTPException(status_code=404, detail=f"Docs dir not found: {docs_path}")
+        stats = ingest_directory(
+            str(docs_path),
+            collection_name,
+            chroma_client,
+            reset=reset,
         )
+        return IngestionResponse(**stats)
 
     if not DOCS_DIR.exists():
         raise HTTPException(status_code=404, detail=f"Docs dir not found: {DOCS_DIR}")
 
-    stats = ingest_directory(str(DOCS_DIR), collection)
-    return IngestionResponse(**stats)
+    all_stats = _ingest_all(reset=reset)
+    if not all_stats:
+        raise HTTPException(status_code=404, detail="No document collections found to ingest")
+
+    combined = {
+        "collection_name": "all",
+        "documents_loaded": sum(s["documents_loaded"] for s in all_stats),
+        "chunks_created": sum(s["chunks_created"] for s in all_stats),
+        "chunks_indexed": sum(s["chunks_indexed"] for s in all_stats),
+        "sources": sorted({src for s in all_stats for src in s["sources"]}),
+    }
+    return IngestionResponse(**combined)
 
 
 @app.post("/ask", response_model=AnswerResponse)
 async def ask(question: Question) -> AnswerResponse:
+    collection_name = question.collection_name or "it_docs"
+    collection = get_collection(collection_name)
+
     if collection.count() == 0:
         raise HTTPException(
             status_code=409,
-            detail="Knowledge base is empty. POST /embed to ingest documentation.",
+            detail=(
+                f"Knowledge base {collection_name!r} is empty. "
+                "POST /embed to ingest documentation."
+            ),
         )
 
-    results = semantic_search(question.query, collection, top_k=5)
+    results = semantic_search(
+        question.query,
+        collection,
+        collection_name=collection_name,
+        top_k=5,
+    )
     llm_result = generate_answer(question.query, results)
     confidence = calculate_confidence(results)
     related = get_related_topics(
         question.query,
         collection,
+        collection_name=collection_name,
         exclude_sources={r["source"] for r in results[:2]},
     )
 

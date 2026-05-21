@@ -10,12 +10,20 @@ import {
 import { ConfidenceBar } from "./ConfidenceBar";
 import { SourceCard } from "./SourceCard";
 
-const SUGGESTIONS = [
+const IT_SUGGESTIONS = [
   "I can't connect to the VPN",
   "How do I reset my password?",
   "My laptop won't turn on",
   "WiFi keeps asking me to authenticate",
   "How do I add a printer?",
+];
+
+const ONBOARDING_SUGGESTIONS = [
+  "How do I execute my first trade?",
+  "What are RFQ and Swarms?",
+  "What compliance checks run before a trade?",
+  "Where do I find bond pricing data?",
+  "Who do I contact for trading vs compliance issues?",
 ];
 
 type Stage = "idle" | "loading" | "answer" | "deflected" | "escalated" | "error";
@@ -24,7 +32,29 @@ interface EscalationState {
   ticketId: string;
 }
 
-export function ChatInterface() {
+export interface ChatInterfaceProps {
+  collectionName?: "it_docs" | "onboarding_docs";
+  placeholder?: string;
+  systemContext?: string;
+}
+
+export function ChatInterface({
+  collectionName = "it_docs",
+  placeholder = "Ask about VPN, passwords, WiFi...",
+  systemContext = "IT support",
+}: ChatInterfaceProps) {
+  const suggestions =
+    collectionName === "onboarding_docs" ? ONBOARDING_SUGGESTIONS : IT_SUGGESTIONS;
+  const escalateLabel =
+    collectionName === "onboarding_docs" ? "No, escalate for help" : "No, escalate to IT";
+  const deflectedMessage =
+    collectionName === "onboarding_docs"
+      ? "Saved your team an estimated 12 minutes. Logged for analytics."
+      : "Saved the IT team an estimated 12 minutes of triage. Logged for analytics.";
+  const escalatedMessage =
+    collectionName === "onboarding_docs"
+      ? "Your onboarding team has the original question and the suggestions you saw."
+      : "The IT team has the original question and the suggestions you saw. Expect a follow-up in Slack soon.";
   const [question, setQuestion] = useState("");
   const [activeQuestion, setActiveQuestion] = useState("");
   const [answer, setAnswer] = useState<AnswerResponse | null>(null);
@@ -61,7 +91,7 @@ export function ChatInterface() {
     setEscalation(null);
 
     try {
-      const response = await askQuestion(query);
+      const response = await askQuestion(query, collectionName);
       setAnswer(response);
       setStage("answer");
     } catch (err) {
@@ -113,7 +143,7 @@ export function ChatInterface() {
     <div className="space-y-6">
       <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
         <label htmlFor="question" className="block text-sm font-medium text-slate-700">
-          What do you need help with?
+          What do you need help with for {systemContext}?
         </label>
         <div className="mt-2 rounded-xl border border-slate-200 bg-slate-50 focus-within:border-sky-400 focus-within:bg-white focus-within:ring-2 focus-within:ring-sky-100">
           <textarea
@@ -121,7 +151,7 @@ export function ChatInterface() {
             value={question}
             onChange={(e) => setQuestion(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="e.g. I can't connect to the VPN and Okta keeps timing out"
+            placeholder={placeholder}
             rows={3}
             className="w-full resize-none rounded-xl bg-transparent p-4 text-sm text-slate-900 outline-none placeholder:text-slate-400"
           />
@@ -144,11 +174,11 @@ export function ChatInterface() {
             >
               {stage === "loading" ? (
                 <>
-                  <Spinner /> Searching docs…
+                  <Spinner /> Searching {systemContext} docs…
                 </>
               ) : (
                 <>
-                  Ask the assistant
+                  Ask the {systemContext} assistant
                   <ArrowIcon />
                 </>
               )}
@@ -158,7 +188,7 @@ export function ChatInterface() {
 
         <div className="mt-4 flex flex-wrap gap-2">
           <span className="text-xs uppercase tracking-wide text-slate-400">Try:</span>
-          {SUGGESTIONS.map((suggestion) => (
+          {suggestions.map((suggestion) => (
             <button
               key={suggestion}
               type="button"
@@ -229,12 +259,19 @@ export function ChatInterface() {
               onDeflect={handleDeflect}
               onEscalate={handleEscalate}
               escalating={escalating}
+              escalateLabel={escalateLabel}
             />
           )}
 
-          {stage === "deflected" && <DeflectedBanner onReset={reset} />}
+          {stage === "deflected" && (
+            <DeflectedBanner onReset={reset} message={deflectedMessage} />
+          )}
           {stage === "escalated" && escalation && (
-            <EscalatedBanner ticketId={escalation.ticketId} onReset={reset} />
+            <EscalatedBanner
+              ticketId={escalation.ticketId}
+              onReset={reset}
+              message={escalatedMessage}
+            />
           )}
         </section>
       )}
@@ -246,10 +283,12 @@ function FeedbackPrompt({
   onDeflect,
   onEscalate,
   escalating,
+  escalateLabel,
 }: {
   onDeflect: () => void;
   onEscalate: () => void;
   escalating: boolean;
+  escalateLabel: string;
 }) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-amber-200 bg-amber-50/70 p-4">
@@ -270,14 +309,20 @@ function FeedbackPrompt({
           className="inline-flex items-center gap-2 rounded-lg border border-rose-200 bg-white px-4 py-2 text-sm font-semibold text-rose-600 shadow-sm transition hover:bg-rose-50 disabled:opacity-50"
         >
           {escalating ? <Spinner /> : <TicketIcon />}
-          {escalating ? "Creating ticket…" : "No, escalate to IT"}
+          {escalating ? "Creating ticket…" : escalateLabel}
         </button>
       </div>
     </div>
   );
 }
 
-function DeflectedBanner({ onReset }: { onReset: () => void }) {
+function DeflectedBanner({
+  onReset,
+  message,
+}: {
+  onReset: () => void;
+  message: string;
+}) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
       <div className="flex items-center gap-3">
@@ -286,9 +331,7 @@ function DeflectedBanner({ onReset }: { onReset: () => void }) {
         </span>
         <div>
           <p className="text-sm font-semibold text-emerald-900">Ticket deflected</p>
-          <p className="text-xs text-emerald-700">
-            Saved the IT team an estimated 12 minutes of triage. Logged for analytics.
-          </p>
+          <p className="text-xs text-emerald-700">{message}</p>
         </div>
       </div>
       <button
@@ -302,7 +345,15 @@ function DeflectedBanner({ onReset }: { onReset: () => void }) {
   );
 }
 
-function EscalatedBanner({ ticketId, onReset }: { ticketId: string; onReset: () => void }) {
+function EscalatedBanner({
+  ticketId,
+  onReset,
+  message,
+}: {
+  ticketId: string;
+  onReset: () => void;
+  message: string;
+}) {
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4">
       <div className="flex items-center gap-3">
@@ -313,10 +364,7 @@ function EscalatedBanner({ ticketId, onReset }: { ticketId: string; onReset: () 
           <p className="text-sm font-semibold text-sky-900">
             Ticket {ticketId} created
           </p>
-          <p className="text-xs text-sky-700">
-            The IT team has the original question and the suggestions you saw. Expect a follow-up
-            in Slack soon.
-          </p>
+          <p className="text-xs text-sky-700">{message}</p>
         </div>
       </div>
       <button

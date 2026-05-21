@@ -73,8 +73,10 @@ A minimal RAG-powered IT support prototype that **deflects common tickets** thro
 │   ├── vite.config.ts
 │   └── postcss.config.js
 ├── data/
-│   ├── docs/                Sample Trumid IT docs (VPN, password, WiFi, etc.)
-│   └── chroma_db/           Persistent vector store (gitignored)
+│   ├── docs/
+│   │   ├── it/              IT support docs (VPN, password, WiFi, etc.)
+│   │   └── onboarding/      Trader onboarding docs (protocols, compliance, etc.)
+│   └── chroma_db/           Persistent vector store (gitignored; `it_docs` + `onboarding_docs` collections)
 └── README.md
 ```
 
@@ -96,7 +98,7 @@ cp .env.example .env
 uvicorn main:app --reload
 ```
 
-The first time the server boots, it auto-ingests every file in `data/docs/`. To re-ingest later (after editing docs):
+On startup, the server auto-ingests `data/docs/it/` into `it_docs` and `data/docs/onboarding/` into `onboarding_docs` when each collection is empty. To re-ingest later (after editing docs):
 
 ```bash
 curl -X POST 'http://127.0.0.1:8000/embed?reset=true'
@@ -119,8 +121,8 @@ Open http://localhost:5173. The Vite dev server proxies `/api/*` to FastAPI on p
 | Method | Path         | Description                                                                  |
 | ------ | ------------ | ---------------------------------------------------------------------------- |
 | GET    | `/health`    | Liveness check + indexed chunk count                                         |
-| POST   | `/embed`     | (Re)ingest `data/docs/`. Pass `?reset=true` to drop the collection first    |
-| POST   | `/ask`       | `{ "query": "..." }` → answer, sources, confidence, related topics           |
+| POST   | `/embed`     | (Re)ingest all collections, or one via `?collection_name=onboarding_docs`. Pass `?reset=true` to drop first |
+| POST   | `/ask`       | `{ "query": "...", "collection_name": "it_docs" }` → answer, sources, confidence, related topics |
 | POST   | `/feedback`  | `{ "question_id": "...", "deflected": true }` — logs deflection outcome     |
 | POST   | `/escalate`  | Creates a mock ticket with the question + attempted solutions preserved      |
 | GET    | `/analytics` | Returns deflection rate, time saved, top questions, recent escalations       |

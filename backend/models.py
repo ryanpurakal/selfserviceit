@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 class Question(BaseModel):
     query: str = Field(..., min_length=1, max_length=2000)
+    collection_name: Optional[str] = "it_docs"
 
 
 class Source(BaseModel):
@@ -48,6 +49,7 @@ class DeflectionFeedback(BaseModel):
 
 
 class IngestionResponse(BaseModel):
+    collection_name: str = ""
     documents_loaded: int
     chunks_created: int
     chunks_indexed: int

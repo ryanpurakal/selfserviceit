@@ -89,10 +89,13 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return (await response.json()) as T;
 }
 
-export function askQuestion(query: string): Promise<AnswerResponse> {
+export function askQuestion(
+  query: string,
+  collectionName: string = "it_docs",
+): Promise<AnswerResponse> {
   return request<AnswerResponse>("/ask", {
     method: "POST",
-    body: JSON.stringify({ query }),
+    body: JSON.stringify({ query, collection_name: collectionName }),
   });
 }
 

@@ -25,8 +25,29 @@ def _distance_to_relevance(distance: float) -> float:
     return min(1.0, similarity)
 
 
-def semantic_search(query: str, collection, top_k: int = 5) -> list[dict[str, Any]]:
+def _resolve_collection(
+    collection,
+    chroma_client,
+    collection_name: str,
+):
+    if collection is not None:
+        return collection
+    if chroma_client is None:
+        raise ValueError("Either collection or chroma_client must be provided")
+    return chroma_client.get_collection(collection_name)
+
+
+def semantic_search(
+    query: str,
+    collection=None,
+    *,
+    chroma_client=None,
+    collection_name: str = "it_docs",
+    top_k: int = 5,
+) -> list[dict[str, Any]]:
     """Run a semantic search and return enriched chunk dicts."""
+
+    collection = _resolve_collection(collection, chroma_client, collection_name)
 
     if collection.count() == 0:
         return []
@@ -79,8 +100,10 @@ def calculate_confidence(results: list[dict[str, Any]]) -> float:
 
 def get_related_topics(
     query: str,
-    collection,
+    collection=None,
     *,
+    chroma_client=None,
+    collection_name: str = "it_docs",
     exclude_sources: set[str] | None = None,
     limit: int = 4,
 ) -> list[str]:
@@ -90,11 +113,19 @@ def get_related_topics(
     different documents (not five chunks from the same VPN guide).
     """
 
+    collection = _resolve_collection(collection, chroma_client, collection_name)
+
     if collection.count() == 0:
         return []
 
     excluded = exclude_sources or set()
-    results = semantic_search(query, collection, top_k=10)
+    results = semantic_search(
+        query,
+        collection,
+        chroma_client=chroma_client,
+        collection_name=collection_name,
+        top_k=10,
+    )
 
     seen: set[str] = set()
     topics: list[str] = []
